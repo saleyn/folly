@@ -32,11 +32,15 @@ AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::defaultConfig;
 template <typename KeyT, typename ValueT,
           typename HashFcn, typename EqualFcn, typename Allocator>
 AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-AtomicHashMap(size_t size, const Config& config)
+AtomicHashMap(size_t size, const Config& config,
+              const typename AtomicHashMap<
+                KeyT, ValueT, HashFcn, EqualFcn, Allocator
+              >::CharAlloc& alloc)
   : kGrowthFrac_(config.growthFactor < 0 ?
-                 1.0 - config.maxLoadFactor : config.growthFactor) {
+                 1.0 - config.maxLoadFactor : config.growthFactor)
+  , allocator_(alloc) {
   CHECK(config.maxLoadFactor > 0.0 && config.maxLoadFactor < 1.0);
-  subMaps_[0].store(SubMap::create(size, config).release(),
+  subMaps_[0].store(SubMap::create(size, allocator_, config).release(),
     std::memory_order_relaxed);
   auto numSubMaps = kNumSubMaps_;
   FOR_EACH_RANGE(i, 1, numSubMaps) {
@@ -120,7 +124,7 @@ insertInternal(key_type key, T&& value) {
     config.maxLoadFactor = primarySubMap->maxLoadFactor();
     config.entryCountThreadCacheSize =
       primarySubMap->getEntryCountThreadCacheSize();
-    subMaps_[nextMapIdx].store(SubMap::create(newSize, config).release(),
+    subMaps_[nextMapIdx].store(SubMap::create(newSize, allocator_, config).release(),
       std::memory_order_relaxed);
 
     // Publish the map to other threads.
@@ -276,7 +280,7 @@ clear() {
   FOR_EACH_RANGE(i, 1, numMaps) {
     SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
     DCHECK(thisMap);
-    SubMap::destroy(thisMap);
+    SubMap::destroy(thisMap, allocator_);
     subMaps_[i].store(nullptr, std::memory_order_relaxed);
   }
   numMapsAllocated_.store(1, std::memory_order_relaxed);

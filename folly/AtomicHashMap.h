@@ -158,9 +158,12 @@ struct AtomicHashMapFullError : std::runtime_error {
 template<class KeyT, class ValueT,
          class HashFcn, class EqualFcn, class Allocator>
 class AtomicHashMap : boost::noncopyable {
-  typedef AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator> SubMap;
-
+  typedef AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn> SubMap;
  public:
+  typedef
+    typename Allocator::template rebind<char>::other
+    CharAlloc;
+
   typedef KeyT                key_type;
   typedef ValueT              mapped_type;
   typedef std::pair<const KeyT, ValueT> value_type;
@@ -192,14 +195,15 @@ class AtomicHashMap : boost::noncopyable {
   // number of elements to maximize space utilization and performance,
   // and a Config object to specify more advanced options.
   static const Config defaultConfig;
-  explicit AtomicHashMap(size_t finalSizeEst, const Config& = defaultConfig);
+  explicit AtomicHashMap(size_t finalSizeEst, const Config& = defaultConfig,
+      const CharAlloc& alloc = CharAlloc());
 
   ~AtomicHashMap() {
     const int numMaps = numMapsAllocated_.load(std::memory_order_relaxed);
     FOR_EACH_RANGE (i, 0, numMaps) {
       SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
       DCHECK(thisMap);
-      SubMap::destroy(thisMap);
+      SubMap::destroy(thisMap, allocator_);
     }
   }
 
@@ -395,6 +399,7 @@ class AtomicHashMap : boost::noncopyable {
 
   SimpleRetT findAtInternal(uint32_t idx) const;
 
+    CharAlloc allocator_;
   std::atomic<SubMap*> subMaps_[kNumSubMaps_];
   std::atomic<uint32_t> numMapsAllocated_;
 

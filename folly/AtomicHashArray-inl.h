@@ -25,8 +25,8 @@ namespace folly {
 
 // AtomicHashArray private constructor --
 template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+          class HashFcn, class EqualFcn>
+AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
 AtomicHashArray(size_t capacity, KeyT emptyKey, KeyT lockedKey,
                 KeyT erasedKey, double maxLoadFactor, size_t cacheSize)
     : capacity_(capacity), maxEntries_(size_t(maxLoadFactor * capacity_ + 0.5)),
@@ -42,11 +42,9 @@ AtomicHashArray(size_t capacity, KeyT emptyKey, KeyT lockedKey,
  *   of key and returns true, or if key does not exist returns false and
  *   ret.index is set to capacity_.
  */
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-typename AtomicHashArray<KeyT, ValueT,
-         HashFcn, EqualFcn, Allocator>::SimpleRetT
-AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+typename AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::SimpleRetT
+AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
 findInternal(const KeyT key_in) {
   DCHECK_NE(key_in, kEmptyKey_);
   DCHECK_NE(key_in, kLockedKey_);
@@ -80,12 +78,10 @@ findInternal(const KeyT key_in) {
  *   this will be the previously inserted value, and if the map is full it is
  *   default.
  */
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
 template <class T>
-typename AtomicHashArray<KeyT, ValueT,
-         HashFcn, EqualFcn, Allocator>::SimpleRetT
-AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+typename AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::SimpleRetT
+AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
 insertInternal(KeyT key_in, T&& value) {
   const short NO_NEW_INSERTS = 1;
   const short NO_PENDING_INSERTS = 2;
@@ -198,9 +194,8 @@ insertInternal(KeyT key_in, T&& value) {
  *   erased key will never be reused. If there's an associated value, we won't
  *   touch it either.
  */
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-size_t AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+size_t AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
 erase(KeyT key_in) {
   CHECK_NE(key_in, kEmptyKey_);
   CHECK_NE(key_in, kLockedKey_);
@@ -242,34 +237,33 @@ erase(KeyT key_in) {
   }
 }
 
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-const typename AtomicHashArray<KeyT, ValueT,
-      HashFcn, EqualFcn, Allocator>::Config
-AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::defaultConfig;
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+const typename AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::Config
+AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::defaultConfig;
 
-template <class KeyT, class ValueT,
-         class HashFcn, class EqualFcn, class Allocator>
-typename AtomicHashArray<KeyT, ValueT,
-         HashFcn, EqualFcn, Allocator>::SmartPtr
-AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-create(size_t maxSize, const Config& c) {
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+template <class Allocator>
+typename AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::template SmartPtr<Allocator>
+AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
+create(size_t maxSize, Allocator& alloc, const Config& c) {
   CHECK_LE(c.maxLoadFactor, 1.0);
   CHECK_GT(c.maxLoadFactor, 0.0);
   CHECK_NE(c.emptyKey, c.lockedKey);
   size_t capacity = size_t(maxSize / c.maxLoadFactor);
   size_t sz = sizeof(AtomicHashArray) + sizeof(value_type) * capacity;
 
-  auto const mem = Allocator().allocate(sz);
+  auto const mem = alloc.allocate(sz);
+  AtomicHashArray* p = reinterpret_cast<AtomicHashArray*>(&*mem);
   try {
-    new (mem) AtomicHashArray(capacity, c.emptyKey, c.lockedKey, c.erasedKey,
-                              c.maxLoadFactor, c.entryCountThreadCacheSize);
+    new (p)
+      AtomicHashArray(capacity, c.emptyKey, c.lockedKey, c.erasedKey,
+                      c.maxLoadFactor, c.entryCountThreadCacheSize);
   } catch (...) {
-    Allocator().deallocate(mem, sz);
+    alloc.deallocate(mem, sz);
     throw;
   }
 
-  SmartPtr map(static_cast<AtomicHashArray*>((void *)mem));
+  SmartPtr<Allocator> map(p, alloc);
 
   /*
    * Mark all cells as empty.
@@ -290,10 +284,10 @@ create(size_t maxSize, const Config& c) {
   return map;
 }
 
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-void AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-destroy(AtomicHashArray* p) {
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+template <class Allocator>
+void AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
+destroy(AtomicHashArray* p, Allocator& alloc) {
   assert(p);
 
   size_t sz = sizeof(AtomicHashArray) + sizeof(value_type) * p->capacity_;
@@ -304,14 +298,13 @@ destroy(AtomicHashArray* p) {
     }
   }
   p->~AtomicHashArray();
-
-  Allocator().deallocate((char *)p, sz);
+  typename Allocator::pointer q(reinterpret_cast<char*>(p));
+  alloc.deallocate(q, sz);
 }
 
 // clear -- clears all keys and values in the map and resets all counters
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-void AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
+void AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
 clear() {
   FOR_EACH_RANGE(i, 0, capacity_) {
     if (cells_[i].first != kEmptyKey_) {
@@ -329,10 +322,9 @@ clear() {
 
 // Iterator implementation
 
-template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
+template <class KeyT, class ValueT, class HashFcn, class EqualFcn>
 template <class ContT, class IterVal>
-struct AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::aha_iterator
+struct AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::aha_iterator
     : boost::iterator_facade<aha_iterator<ContT,IterVal>,
                              IterVal,
                              boost::forward_traversal_tag>

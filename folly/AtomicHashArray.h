@@ -50,8 +50,7 @@ class AtomicHashMap;
 
 template <class KeyT, class ValueT,
           class HashFcn = std::hash<KeyT>,
-          class EqualFcn = std::equal_to<KeyT>,
-          class Allocator = std::allocator<char>>
+          class EqualFcn = std::equal_to<KeyT>>
 class AtomicHashArray : boost::noncopyable {
   static_assert((std::is_convertible<KeyT,int32_t>::value ||
                  std::is_convertible<KeyT,int64_t>::value ||
@@ -86,19 +85,26 @@ class AtomicHashArray : boost::noncopyable {
   // but if you really want to do something crazy like stick the released
   // pointer into a DescriminatedPtr or something, you'll need this to clean up
   // after yourself.
-  static void destroy(AtomicHashArray*);
+  template <class Allocator>
+  static void destroy(AtomicHashArray*, Allocator&);
 
  private:
   const size_t  kAnchorMask_;
 
-  struct Deleter {
+  template <class Allocator>
+  class Deleter {
+    Allocator& alloc_;
+  public:
+    Deleter(Allocator& alloc) : alloc_(alloc) {}
+
     void operator()(AtomicHashArray* ptr) {
-      AtomicHashArray::destroy(ptr);
+      AtomicHashArray::destroy(ptr, alloc_);
     }
   };
 
  public:
-  typedef std::unique_ptr<AtomicHashArray, Deleter> SmartPtr;
+  template <typename Allocator>
+  using SmartPtr = std::unique_ptr<AtomicHashArray, Deleter<Allocator>>;
 
   /*
    * create --
@@ -138,7 +144,10 @@ class AtomicHashArray : boost::noncopyable {
   };
 
   static const Config defaultConfig;
-  static SmartPtr create(size_t maxSize, const Config& = defaultConfig);
+
+  template <class Allocator>
+  static SmartPtr<Allocator> create(size_t maxSize, Allocator& alloc,
+                                    const Config& = defaultConfig);
 
   iterator find(KeyT k) {
     return iterator(this, findInternal(k).idx);
@@ -219,7 +228,8 @@ class AtomicHashArray : boost::noncopyable {
   /* Private data and helper functions... */
 
  private:
-  friend class AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>;
+  template <class K, class V, class H, class E, class A>
+  friend class AtomicHashMap;
 
   struct SimpleRetT { size_t idx; bool success;
     SimpleRetT(size_t i, bool s) : idx(i), success(s) {}
