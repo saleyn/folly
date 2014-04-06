@@ -27,14 +27,12 @@ namespace folly {
 template <class KeyT, class ValueT,
           class HashFcn, class EqualFcn>
 AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>::
-AtomicHashArray(size_t capacity, const Config& c)
-    noexcept
-    : capacity_(capacity), maxEntries_(size_t(c.maxLoadFactor * capacity_ + 0.5)),
-      kAnchorMask_(nextPowTwo(capacity_) - 1),
-      kEmptyKey_(c.emptyKey), kLockedKey_(c.lockedKey), kErasedKey_(c.erasedKey),
-      kHashFcn_(c.hashFcn), kEqualFcn_(c.equalFcn),
-      numEntries_(0, c.entryCountThreadCacheSize),
-      numPendingEntries_(0, c.entryCountThreadCacheSize), isFull_(0), numErases_(0) {
+AtomicHashArray(size_t capacity, KeyT emptyKey, KeyT lockedKey,
+                KeyT erasedKey, double maxLoadFactor, size_t cacheSize)
+    : capacity_(capacity), maxEntries_(size_t(maxLoadFactor * capacity_ + 0.5)),
+      kEmptyKey_(emptyKey), kLockedKey_(lockedKey), kErasedKey_(erasedKey),
+      kAnchorMask_(nextPowTwo(capacity_) - 1), numEntries_(0, cacheSize),
+      numPendingEntries_(0, cacheSize), isFull_(0), numErases_(0) {
 }
 
 /*
@@ -257,8 +255,12 @@ create(size_t maxSize, Allocator& alloc, const Config& c) {
   // dereference/reference it to let the compiler know we want the real pointer
   AtomicHashArray* p = reinterpret_cast<AtomicHashArray*>(&*mem);
 
+  auto const mem = alloc.allocate(sz);
+  AtomicHashArray* p = reinterpret_cast<AtomicHashArray*>(&*mem);
   try {
-    new (p) AtomicHashArray(capacity, c);
+    new (p)
+      AtomicHashArray(capacity, c.emptyKey, c.lockedKey, c.erasedKey,
+                      c.maxLoadFactor, c.entryCountThreadCacheSize);
   } catch (...) {
     alloc.deallocate(mem, sz);
     throw;
@@ -300,7 +302,8 @@ destroy(AtomicHashArray* p, Allocator& alloc) {
 
   size_t sz = Config::memorySize(p->capacity_);
 
-  alloc.deallocate((char *)p, sz);
+  typename Allocator::pointer q(reinterpret_cast<char*>(p));
+  alloc.deallocate(q, sz);
 }
 
 // clear -- clears all keys and values in the map and resets all counters

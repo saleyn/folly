@@ -37,13 +37,16 @@ kLockedPtr_ = PSubMap(reinterpret_cast<SubMap*>(0x88ul << 48)); // invalid point
 template <class KeyT, class ValueT,
           class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
-AtomicHashMap(size_t size, const Config& config, const CharAlloc& alloc)
+AtomicHashMap(size_t size, const Config& config,
+              const typename AtomicHashMap<
+                KeyT, ValueT, HashFcn, EqualFcn, Allocator
+              >::CharAlloc& alloc)
   : kGrowthFrac_(config.growthFactor < 0 ?
                  1.0 - config.maxLoadFactor : config.growthFactor),
     allocator_(alloc),
     kConfig_(config) {
   CHECK(config.maxLoadFactor > 0.0 && config.maxLoadFactor < 1.0);
-  subMaps_[0].store(SubMap::create(size, allocator_, kConfig_).release(),
+  subMaps_[0].store(SubMap::create(size, allocator_, config).release(),
     std::memory_order_relaxed);
   auto numSubMaps = kNumSubMaps_;
   FOR_EACH_RANGE(i, 1, numSubMaps) {

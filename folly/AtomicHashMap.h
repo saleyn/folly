@@ -160,6 +160,7 @@ template<class KeyT, class ValueT,
          class SubMap = AtomicHashArray<KeyT,ValueT,HashFcn,EqualFcn>,
          class PSubMap = SubMap*>
 class AtomicHashMap : boost::noncopyable {
+  typedef AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn> SubMap;
  public:
   typedef
     typename Allocator::template rebind<char>::other
