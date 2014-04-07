@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 #
 # Generate tables for GroupVarint32
 # Copyright 2011 Facebook
