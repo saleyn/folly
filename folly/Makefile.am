@@ -10,6 +10,7 @@ generate_fingerprint_tables_LDADD = libfollybase.la
 
 noinst_LTLIBRARIES = \
 	libfollybase.la
+generate_fingerprint_tables_LDFLAGS = -rpath $(subst -L,,$(BOOST_LDFLAGS))
 
 lib_LTLIBRARIES = \
 	libfolly.la \
