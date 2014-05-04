@@ -65,7 +65,7 @@ struct ProducerConsumerQueue : private boost::noncopyable {
       int end = writeIndex_;
       while (read != end) {
         records_[read].~T();
-        if (++read == size_) {
+        if (++read == int(size_)) {
           read = 0;
         }
       }
@@ -78,7 +78,7 @@ struct ProducerConsumerQueue : private boost::noncopyable {
   bool write(Args&&... recordArgs) {
     auto const currentWrite = writeIndex_.load(std::memory_order_relaxed);
     auto nextRecord = currentWrite + 1;
-    if (nextRecord == size_) {
+    if (nextRecord == int(size_)) {
       nextRecord = 0;
     }
     if (nextRecord != readIndex_.load(std::memory_order_acquire)) {
@@ -100,7 +100,7 @@ struct ProducerConsumerQueue : private boost::noncopyable {
     }
 
     auto nextRecord = currentRead + 1;
-    if (nextRecord == size_) {
+    if (nextRecord == int(size_)) {
       nextRecord = 0;
     }
     record = std::move(records_[currentRead]);
@@ -126,7 +126,7 @@ struct ProducerConsumerQueue : private boost::noncopyable {
     assert(currentRead != writeIndex_.load(std::memory_order_acquire));
 
     auto nextRecord = currentRead + 1;
-    if (nextRecord == size_) {
+    if (nextRecord == int(size_)) {
       nextRecord = 0;
     }
     records_[currentRead].~T();
@@ -140,7 +140,7 @@ struct ProducerConsumerQueue : private boost::noncopyable {
 
   bool isFull() const {
     auto nextRecord = writeIndex_.load(std::memory_order_consume) + 1;
-    if (nextRecord == size_) {
+    if (nextRecord == int(size_)) {
       nextRecord = 0;
     }
     if (nextRecord != readIndex_.load(std::memory_order_consume)) {
