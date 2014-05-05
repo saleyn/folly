@@ -252,7 +252,7 @@ class ThreadLocalPtr {
 
       bool valid() const {
         return (e_->elements &&
-                accessor_->id_ < e_->elementsCapacity &&
+                accessor_->id_ < int(e_->elementsCapacity) &&
                 e_->elements[accessor_->id_].ptr);
       }
 
