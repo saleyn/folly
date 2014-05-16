@@ -156,9 +156,10 @@ struct AtomicHashMapFullError : std::runtime_error {
 };
 
 template<class KeyT, class ValueT,
-         class HashFcn, class EqualFcn, class Allocator>
+         class HashFcn, class EqualFcn, class Allocator,
+         class SubMap = AtomicHashArray<KeyT,ValueT,HashFcn,EqualFcn>,
+         class PSubMap = SubMap*>
 class AtomicHashMap : boost::noncopyable {
-  typedef AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn> SubMap;
  public:
   typedef
     typename Allocator::template rebind<char>::other
@@ -196,19 +197,19 @@ class AtomicHashMap : boost::noncopyable {
   // and a Config object to specify more advanced options.
   static const Config defaultConfig;
   explicit AtomicHashMap(size_t finalSizeEst, const Config& = defaultConfig,
-      const CharAlloc& alloc = CharAlloc());
+                         const CharAlloc& alloc = CharAlloc());
 
   ~AtomicHashMap() {
     const int numMaps = numMapsAllocated_.load(std::memory_order_relaxed);
     FOR_EACH_RANGE (i, 0, numMaps) {
-      SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
+      PSubMap thisMap = subMaps_[i].load(std::memory_order_relaxed);
       DCHECK(thisMap);
-      SubMap::destroy(thisMap, allocator_);
+      SubMap::destroy(&*thisMap, allocator_);
     }
   }
 
-  key_equal key_eq() const { return key_equal(); }
-  hasher hash_function() const { return hasher(); }
+  const key_equal& key_eq() const { return kConfig_.kEqualFcn_; }
+  const hasher& hash_function() const { return kConfig_.kHashFcn_; }
 
   // TODO: emplace() support would be nice.
 
@@ -230,11 +231,11 @@ class AtomicHashMap : boost::noncopyable {
   std::pair<iterator,bool> insert(const value_type& r) {
     return insert(r.first, r.second);
   }
-  std::pair<iterator,bool> insert(key_type k, const mapped_type& v);
+  std::pair<iterator,bool> insert(const key_type& k, const mapped_type& v);
   std::pair<iterator,bool> insert(value_type&& r) {
     return insert(r.first, std::move(r.second));
   }
-  std::pair<iterator,bool> insert(key_type k, mapped_type&& v);
+  std::pair<iterator,bool> insert(const key_type& k, mapped_type&& v);
 
   /*
    * find --
@@ -243,8 +244,8 @@ class AtomicHashMap : boost::noncopyable {
    *
    *   If the key is not found, returns end().
    */
-  iterator find(key_type k);
-  const_iterator find(key_type k) const;
+  iterator find(const key_type& k);
+  const_iterator find(const key_type& k) const;
 
   /*
    * erase --
@@ -253,7 +254,7 @@ class AtomicHashMap : boost::noncopyable {
    *
    *   Returns 1 iff the key is found and erased, and 0 otherwise.
    */
-  size_type erase(key_type k);
+  size_type erase(const key_type& k);
 
   /*
    * clear --
@@ -277,7 +278,7 @@ class AtomicHashMap : boost::noncopyable {
 
   bool empty() const { return size() == 0; }
 
-  size_type count(key_type k) const {
+  size_type count(const key_type& k) const {
     return find(k) == end() ? 0 : 1;
   }
 
@@ -310,7 +311,7 @@ class AtomicHashMap : boost::noncopyable {
   void setEntryCountThreadCacheSize(int32_t newSize) {
     const int numMaps = numMapsAllocated_.load(std::memory_order_acquire);
     for (int i = 0; i < numMaps; ++i) {
-      SubMap* map = subMaps_[i].load(std::memory_order_relaxed);
+      PSubMap map = subMaps_[i].load(std::memory_order_relaxed);
       map->setEntryCountThreadCacheSize(newSize);
     }
   }
@@ -353,19 +354,19 @@ class AtomicHashMap : boost::noncopyable {
     return encodeIndex(ret.i, ret.j);
   }
 
-  inline uint32_t recToIdx(key_type k, const mapped_type& v,
+  inline uint32_t recToIdx(const key_type& k, const mapped_type& v,
     bool mayInsert = true) {
     SimpleRetT ret = mayInsert ? insertInternal(k, v) : findInternal(k);
     return encodeIndex(ret.i, ret.j);
   }
 
-  inline uint32_t recToIdx(key_type k, mapped_type&& v, bool mayInsert = true) {
+  inline uint32_t recToIdx(const key_type& k, mapped_type&& v, bool mayInsert = true) {
     SimpleRetT ret = mayInsert ?
       insertInternal(k, std::move(v)) : findInternal(k);
     return encodeIndex(ret.i, ret.j);
   }
 
-  inline uint32_t keyToIdx(const KeyT k, bool mayInsert = false) {
+  inline uint32_t keyToIdx(const KeyT& k, bool mayInsert = false) {
     return recToIdx(value_type(k), mayInsert);
   }
 
@@ -385,7 +386,7 @@ class AtomicHashMap : boost::noncopyable {
   static const uint32_t  kSubMapIndexShift_  = 32 - kNumSubMapBits_ - 1;
   static const uint32_t  kSubMapIndexMask_   = (1 << kSubMapIndexShift_) - 1;
   static const uint32_t  kNumSubMaps_        = 1 << kNumSubMapBits_;
-  static const uintptr_t kLockedPtr_         = 0x88ul << 48; // invalid pointer
+  static const PSubMap   kLockedPtr_;
 
   struct SimpleRetT { uint32_t i; size_t j; bool success;
     SimpleRetT(uint32_t ii, size_t jj, bool s) : i(ii), j(jj), success(s) {}
@@ -393,19 +394,20 @@ class AtomicHashMap : boost::noncopyable {
   };
 
   template <class T>
-  SimpleRetT insertInternal(KeyT key, T&& value);
+  SimpleRetT insertInternal(const KeyT& key, T&& value);
 
-  SimpleRetT findInternal(const KeyT k) const;
+  SimpleRetT findInternal(const KeyT& k) const;
 
   SimpleRetT findAtInternal(uint32_t idx) const;
 
-    CharAlloc allocator_;
-  std::atomic<SubMap*> subMaps_[kNumSubMaps_];
-  std::atomic<uint32_t> numMapsAllocated_;
+  CharAlloc               allocator_;
+  std::atomic<PSubMap>    subMaps_[kNumSubMaps_];
+  std::atomic<uint32_t>   numMapsAllocated_;
+  const Config            kConfig_;
 
   inline bool tryLockMap(int idx) {
-    SubMap* val = nullptr;
-    return subMaps_[idx].compare_exchange_strong(val, (SubMap*)kLockedPtr_,
+    PSubMap val = nullptr;
+    return subMaps_[idx].compare_exchange_strong(val, kLockedPtr_,
       std::memory_order_acquire);
   }
 

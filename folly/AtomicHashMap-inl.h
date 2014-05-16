@@ -23,24 +23,27 @@
 namespace folly {
 
 template <class KeyT, class ValueT,
-          class HashFcn, class EqualFcn, class Allocator>
-const typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::Config
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::defaultConfig;
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+const typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::Config
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::defaultConfig;
+
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+const PSubMap AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+kLockedPtr_ = PSubMap(reinterpret_cast<SubMap*>(0x88ul << 48)); // invalid pointer
 
 // AtomicHashMap constructor -- Atomic wrapper that allows growth
 // This class has a lot of overhead (184 Bytes) so only use for big maps
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-AtomicHashMap(size_t size, const Config& config,
-              const typename AtomicHashMap<
-                KeyT, ValueT, HashFcn, EqualFcn, Allocator
-              >::CharAlloc& alloc)
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+AtomicHashMap(size_t size, const Config& config, const CharAlloc& alloc)
   : kGrowthFrac_(config.growthFactor < 0 ?
-                 1.0 - config.maxLoadFactor : config.growthFactor)
-  , allocator_(alloc) {
+                 1.0 - config.maxLoadFactor : config.growthFactor),
+    allocator_(alloc),
+    kConfig_(config) {
   CHECK(config.maxLoadFactor > 0.0 && config.maxLoadFactor < 1.0);
-  subMaps_[0].store(SubMap::create(size, allocator_, config).release(),
+  subMaps_[0].store(SubMap::create(size, allocator_, kConfig_).release(),
     std::memory_order_relaxed);
   auto numSubMaps = kNumSubMaps_;
   FOR_EACH_RANGE(i, 1, numSubMaps) {
@@ -50,44 +53,44 @@ AtomicHashMap(size_t size, const Config& config,
 }
 
 // insert --
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 std::pair<typename AtomicHashMap<KeyT, ValueT, HashFcn,
-                                 EqualFcn, Allocator>::iterator, bool>
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-insert(key_type k, const mapped_type& v) {
+                                 EqFcn, Alloc, SubMap, PSubMap>::iterator, bool>
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+insert(const key_type& k, const mapped_type& v) {
   SimpleRetT ret = insertInternal(k,v);
-  SubMap* subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
+  PSubMap subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
   return std::make_pair(iterator(this, ret.i, subMap->makeIter(ret.j)),
                         ret.success);
 }
 
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 std::pair<typename AtomicHashMap<KeyT, ValueT, HashFcn,
-                                 EqualFcn, Allocator>::iterator, bool>
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-insert(key_type k, mapped_type&& v) {
+                                 EqFcn, Alloc, SubMap, PSubMap>::iterator, bool>
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+insert(const key_type& k, mapped_type&& v) {
   SimpleRetT ret = insertInternal(k, std::move(v));
-  SubMap* subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
+  PSubMap subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
   return std::make_pair(iterator(this, ret.i, subMap->makeIter(ret.j)),
                         ret.success);
 }
 
 // insertInternal -- Allocates new sub maps as existing ones fill up.
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 template <class T>
-typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::SimpleRetT
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-insertInternal(key_type key, T&& value) {
+typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::SimpleRetT
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+insertInternal(const key_type& key, T&& value) {
  beginInsertInternal:
   int nextMapIdx = // this maintains our state
     numMapsAllocated_.load(std::memory_order_acquire);
   typename SubMap::SimpleRetT ret;
   FOR_EACH_RANGE(i, 0, nextMapIdx) {
     // insert in each map successively.  If one succeeds, we're done!
-    SubMap* subMap = subMaps_[i].load(std::memory_order_relaxed);
+    PSubMap subMap = subMaps_[i].load(std::memory_order_relaxed);
     ret = subMap->insertInternal(key, std::forward<T>(value));
     if (ret.idx == subMap->capacity_) {
       continue;  //map is full, so try the next one
@@ -99,8 +102,8 @@ insertInternal(key_type key, T&& value) {
   // If we made it this far, all maps are full and we need to try to allocate
   // the next one.
 
-  SubMap* primarySubMap = subMaps_[0].load(std::memory_order_relaxed);
-  if (nextMapIdx >= kNumSubMaps_ ||
+  PSubMap primarySubMap = subMaps_[0].load(std::memory_order_relaxed);
+  if (nextMapIdx >= int(kNumSubMaps_) ||
       primarySubMap->capacity_ * kGrowthFrac_ < 1.0) {
     // Can't allocate any more sub maps.
     throw AtomicHashMapFullError();
@@ -113,18 +116,12 @@ insertInternal(key_type key, T&& value) {
       (primarySubMap->capacity_ *
        std::pow(1.0 + kGrowthFrac_, nextMapIdx - 1));
     size_t newSize = (int) (numCellsAllocated * kGrowthFrac_);
-    DCHECK(subMaps_[nextMapIdx].load(std::memory_order_relaxed) ==
-      (SubMap*)kLockedPtr_);
+    SubMap* p = subMaps_[nextMapIdx].load(std::memory_order_relaxed);
+    DCHECK(p == kLockedPtr_);
     // create a new map using the settings stored in the first map
 
-    Config config;
-    config.emptyKey = primarySubMap->kEmptyKey_;
-    config.lockedKey = primarySubMap->kLockedKey_;
-    config.erasedKey = primarySubMap->kErasedKey_;
-    config.maxLoadFactor = primarySubMap->maxLoadFactor();
-    config.entryCountThreadCacheSize =
-      primarySubMap->getEntryCountThreadCacheSize();
-    subMaps_[nextMapIdx].store(SubMap::create(newSize, allocator_, config).release(),
+    subMaps_[nextMapIdx].store(
+      SubMap::create(newSize, allocator_, kConfig_).release(),
       std::memory_order_relaxed);
 
     // Publish the map to other threads.
@@ -135,14 +132,14 @@ insertInternal(key_type key, T&& value) {
     // If we lost the race, we'll have to wait for the next map to get
     // allocated before doing any insertion here.
     FOLLY_SPIN_WAIT(
-      nextMapIdx >= numMapsAllocated_.load(std::memory_order_acquire)
+      nextMapIdx >= int(numMapsAllocated_.load(std::memory_order_acquire))
     );
   }
 
   // Relaxed is ok here because either we just created this map, or we
   // just did a spin wait with an acquire load on numMapsAllocated_.
-  SubMap* loadedMap = subMaps_[nextMapIdx].load(std::memory_order_relaxed);
-  DCHECK(loadedMap && loadedMap != (SubMap*)kLockedPtr_);
+  PSubMap loadedMap = subMaps_[nextMapIdx].load(std::memory_order_relaxed);
+  DCHECK(loadedMap && loadedMap != kLockedPtr_);
   ret = loadedMap->insertInternal(key, std::forward<T>(value));
   if (ret.idx != loadedMap->capacity_) {
     return SimpleRetT(nextMapIdx, ret.idx, ret.success);
@@ -153,35 +150,35 @@ insertInternal(key_type key, T&& value) {
 }
 
 // find --
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::iterator
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-find(KeyT k) {
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::iterator
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+find(const KeyT& k) {
   SimpleRetT ret = findInternal(k);
   if (!ret.success) {
     return end();
   }
-  SubMap* subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
+  PSubMap subMap = subMaps_[ret.i].load(std::memory_order_relaxed);
   return iterator(this, ret.i, subMap->makeIter(ret.j));
 }
 
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 typename AtomicHashMap<KeyT, ValueT,
-         HashFcn, EqualFcn, Allocator>::const_iterator
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-find(KeyT k) const {
+         HashFcn, EqFcn, Alloc, SubMap, PSubMap>::const_iterator
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+find(const KeyT& k) const {
   return const_cast<AtomicHashMap*>(this)->find(k);
 }
 
 // findInternal --
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::SimpleRetT
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-findInternal(const KeyT k) const {
-  SubMap* const primaryMap = subMaps_[0].load(std::memory_order_relaxed);
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::SimpleRetT
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+findInternal(const KeyT& k) const {
+  PSubMap const primaryMap = subMaps_[0].load(std::memory_order_relaxed);
   typename SubMap::SimpleRetT ret = primaryMap->findInternal(k);
   if (LIKELY(ret.idx != primaryMap->capacity_)) {
     return SimpleRetT(0, ret.idx, ret.success);
@@ -189,7 +186,7 @@ findInternal(const KeyT k) const {
   int const numMaps = numMapsAllocated_.load(std::memory_order_acquire);
   FOR_EACH_RANGE(i, 1, numMaps) {
     // Check each map successively.  If one succeeds, we're done!
-    SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
+    PSubMap const thisMap = subMaps_[i].load(std::memory_order_relaxed);
     ret = thisMap->findInternal(k);
     if (LIKELY(ret.idx != thisMap->capacity_)) {
       return SimpleRetT(i, ret.idx, ret.success);
@@ -200,10 +197,10 @@ findInternal(const KeyT k) const {
 }
 
 // findAtInternal -- see encodeIndex() for details.
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::SimpleRetT
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::SimpleRetT
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 findAtInternal(uint32_t idx) const {
   uint32_t subMapIdx, subMapOffset;
   if (idx & kSecondaryMapBit_) {
@@ -221,11 +218,11 @@ findAtInternal(uint32_t idx) const {
 }
 
 // erase --
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-typename AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::size_type
-AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
-erase(const KeyT k) {
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+typename AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::size_type
+AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
+erase(const KeyT& k) {
   int const numMaps = numMapsAllocated_.load(std::memory_order_acquire);
   FOR_EACH_RANGE(i, 0, numMaps) {
     // Check each map successively.  If one succeeds, we're done!
@@ -238,9 +235,9 @@ erase(const KeyT k) {
 }
 
 // capacity -- summation of capacities of all submaps
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 capacity() const {
   size_t totalCap(0);
   int const numMaps = numMapsAllocated_.load(std::memory_order_acquire);
@@ -252,14 +249,14 @@ capacity() const {
 
 // spaceRemaining --
 // number of new insertions until current submaps are all at max load
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 spaceRemaining() const {
   size_t spaceRem(0);
   int const numMaps = numMapsAllocated_.load(std::memory_order_acquire);
   FOR_EACH_RANGE(i, 0, numMaps) {
-    SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
+    PSubMap thisMap = subMaps_[i].load(std::memory_order_relaxed);
     spaceRem += std::max(
       0,
       thisMap->maxEntries_ - &thisMap->numEntries_.readFull()
@@ -270,15 +267,15 @@ spaceRemaining() const {
 
 // clear -- Wipes all keys and values from primary map and destroys
 // all secondary maps.  Not thread safe.
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-void AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+void AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 clear() {
   subMaps_[0].load(std::memory_order_relaxed)->clear();
   int const numMaps = numMapsAllocated_
     .load(std::memory_order_relaxed);
   FOR_EACH_RANGE(i, 1, numMaps) {
-    SubMap* thisMap = subMaps_[i].load(std::memory_order_relaxed);
+    PSubMap thisMap = subMaps_[i].load(std::memory_order_relaxed);
     DCHECK(thisMap);
     SubMap::destroy(thisMap, allocator_);
     subMaps_[i].store(nullptr, std::memory_order_relaxed);
@@ -287,9 +284,9 @@ clear() {
 }
 
 // size --
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+size_t AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 size() const {
   size_t totalSize(0);
   int const numMaps = numMapsAllocated_.load(std::memory_order_acquire);
@@ -317,9 +314,9 @@ size() const {
 //         31              1
 //      27-30   which subMap
 //       0-26  subMap offset (index_ret input)
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
-inline uint32_t AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
+inline uint32_t AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::
 encodeIndex(uint32_t subMap, uint32_t offset) {
   DCHECK_EQ(offset & kSecondaryMapBit_, 0);  // offset can't be too big
   if (subMap == 0) return offset;
@@ -335,10 +332,10 @@ encodeIndex(uint32_t subMap, uint32_t offset) {
 
 // Iterator implementation
 
-template <typename KeyT, typename ValueT,
-          typename HashFcn, typename EqualFcn, typename Allocator>
+template <class KeyT, class ValueT,
+          class HashFcn, class EqFcn, class Alloc, class SubMap, class PSubMap>
 template<class ContT, class IterVal, class SubIt>
-struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
+struct AtomicHashMap<KeyT, ValueT, HashFcn, EqFcn, Alloc, SubMap, PSubMap>::ahm_iterator
     : boost::iterator_facade<ahm_iterator<ContT,IterVal,SubIt>,
                              IterVal,
                              boost::forward_traversal_tag>
@@ -410,7 +407,7 @@ struct AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>::ahm_iterator
       return;
     }
 
-    SubMap* thisMap = ahm_->subMaps_[subMap_].
+    PSubMap thisMap = ahm_->subMaps_[subMap_].
       load(std::memory_order_relaxed);
     if (subIt_ == thisMap->end()) {
       // This sub iterator is done, advance to next one
