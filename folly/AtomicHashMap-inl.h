@@ -46,7 +46,7 @@ AtomicHashMap(size_t size, const Config& config,
     allocator_(alloc),
     kConfig_(config) {
   CHECK(config.maxLoadFactor > 0.0 && config.maxLoadFactor < 1.0);
-  subMaps_[0].store(SubMap::create(size, allocator_, config).release(),
+  subMaps_[0].store(SubMap::create(size, allocator_, kConfig_).release(),
     std::memory_order_relaxed);
   auto numSubMaps = kNumSubMaps_;
   FOR_EACH_RANGE(i, 1, numSubMaps) {
