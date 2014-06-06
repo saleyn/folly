@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2
 #
 # Generate Escape tables.
 # Copyright 2011 Facebook

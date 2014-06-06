@@ -43,15 +43,16 @@
 namespace folly {
 
 template <class KeyT, class ValueT,
-          class HashFcn = std::hash<KeyT>,
-          class EqualFcn = std::equal_to<KeyT>,
-          class Allocator = std::allocator<char>>
+          class HashFcn,
+          class EqualFcn,
+          class Allocator,
+          class SubMap,
+          class SubMapPtr>
 class AtomicHashMap;
 
 template <class KeyT, class ValueT,
           class HashFcn = std::hash<KeyT>,
-          class EqualFcn = std::equal_to<KeyT>,
-          class Allocator = std::allocator<char>>
+          class EqualFcn = std::equal_to<KeyT>>
 class AtomicHashArray : boost::noncopyable {
   static_assert((std::is_convertible<KeyT,int32_t>::value ||
                  std::is_convertible<KeyT,int64_t>::value ||
@@ -72,9 +73,6 @@ class AtomicHashArray : boost::noncopyable {
 
   const size_t  capacity_;
   const size_t  maxEntries_;
-  const KeyT    kEmptyKey_;
-  const KeyT    kLockedKey_;
-  const KeyT    kErasedKey_;
 
   template<class ContT, class IterVal>
   struct aha_iterator;
@@ -86,19 +84,40 @@ class AtomicHashArray : boost::noncopyable {
   // but if you really want to do something crazy like stick the released
   // pointer into a DescriminatedPtr or something, you'll need this to clean up
   // after yourself.
-  static void destroy(AtomicHashArray*);
+  template <class Allocator>
+  static void destroy(AtomicHashArray*, Allocator&);
 
+  const EqualFcn& EqFcn() const { return kEqualFcn_; }
+  const HashFcn&  HsFcn() const { return kHashFcn_;  }
  private:
-  const size_t  kAnchorMask_;
+  const size_t    kAnchorMask_;
+  const KeyT      kEmptyKey_;
+  const KeyT      kLockedKey_;
+  const KeyT      kErasedKey_;
+  const HashFcn   kHashFcn_;
+  const EqualFcn  kEqualFcn_;
 
-  struct Deleter {
+  template <class Allocator>
+  class Deleter {
+    Allocator& alloc_;
+  public:
+    Deleter(Allocator& alloc) : alloc_(alloc) {}
+
     void operator()(AtomicHashArray* ptr) {
-      AtomicHashArray::destroy(ptr);
+      AtomicHashArray::destroy(ptr, alloc_);
     }
   };
 
+  bool isKeyEq(const KeyT& a, const KeyT& b) const { return kEqualFcn_(a, b); }
+  size_t hash(const KeyT& a) const { return kHashFcn_(a); }
+
+  bool isEmptyKey (const KeyT& a) const { return kEqualFcn_(kEmptyKey_, a); }
+  bool isLockedKey(const KeyT& a) const { return kEqualFcn_(kLockedKey_,a); }
+  bool isErasedKey(const KeyT& a) const { return kEqualFcn_(kErasedKey_,a); }
+
  public:
-  typedef std::unique_ptr<AtomicHashArray, Deleter> SmartPtr;
+  template <typename Allocator>
+  using SmartPtr = std::unique_ptr<AtomicHashArray, Deleter<Allocator>>;
 
   /*
    * create --
@@ -120,25 +139,54 @@ class AtomicHashArray : boost::noncopyable {
    *   deleter to make sure everything is cleaned up properly.
    */
   struct Config {
-    KeyT   emptyKey;
-    KeyT   lockedKey;
-    KeyT   erasedKey;
-    double maxLoadFactor;
-    double growthFactor;
-    int    entryCountThreadCacheSize;
-    size_t capacity; // if positive, overrides maxLoadFactor
+    KeyT      emptyKey;
+    KeyT      lockedKey;
+    KeyT      erasedKey;
+    HashFcn   hashFcn;
+    EqualFcn  equalFcn;
+    double    maxLoadFactor;
+    double    growthFactor;
+    int       entryCountThreadCacheSize;
+    size_t    capacity; // if positive, overrides maxLoadFactor
 
-    constexpr Config() : emptyKey((KeyT)-1),
-                         lockedKey((KeyT)-2),
-                         erasedKey((KeyT)-3),
-                         maxLoadFactor(0.8),
-                         growthFactor(-1),
-                         entryCountThreadCacheSize(1000),
-                         capacity(0) {}
+    static constexpr const double defMaxLoadFactor = 0.8;
+
+    Config(const KeyT& emptyK    = (KeyT)-1,
+           const KeyT& lockedK   = (KeyT)-2,
+           const KeyT& erasedK   = (KeyT)-3,
+           const HashFcn& hash   = HashFcn(),
+           const EqualFcn& equal = EqualFcn(),
+           double maxLoadFactor  = defMaxLoadFactor,
+           double growthFactor   = -1,
+           int    countCacheSize = 1000,
+           size_t capacity       = 0)
+      : emptyKey(emptyK),
+        lockedKey(lockedK),
+        erasedKey(erasedK),
+        hashFcn(hash),
+        equalFcn(equal),
+        maxLoadFactor(maxLoadFactor),
+        growthFactor(growthFactor),
+        entryCountThreadCacheSize(countCacheSize),
+        capacity(capacity) {}
+
+    // Returns memory size needed for allocating given number of elements.
+    // Capacity argument is adjusted by the maxLoadFactor
+    static size_t memorySize(size_t& capacity, double maxLoadFactor) {
+      capacity /= maxLoadFactor;
+      return memorySize(capacity);
+    }
+    static size_t memorySize(size_t capacity) {
+      return sizeof(AtomicHashArray<KeyT, ValueT, HashFcn, EqualFcn>)
+          + sizeof(value_type) * capacity;
+    }
   };
 
   static const Config defaultConfig;
-  static SmartPtr create(size_t maxSize, const Config& = defaultConfig);
+
+  template <class Allocator>
+  static SmartPtr<Allocator> create(
+    size_t maxSize, Allocator& alloc, const Config& = defaultConfig);
 
   iterator find(KeyT k) {
     return iterator(this, findInternal(k).idx);
@@ -168,7 +216,7 @@ class AtomicHashArray : boost::noncopyable {
   }
 
   // returns the number of elements erased - should never exceed 1
-  size_t erase(KeyT k);
+  size_t erase(const KeyT& k);
 
   // clears all keys and values in the map and resets all counters.  Not thread
   // safe.
@@ -219,7 +267,8 @@ class AtomicHashArray : boost::noncopyable {
   /* Private data and helper functions... */
 
  private:
-  friend class AtomicHashMap<KeyT, ValueT, HashFcn, EqualFcn, Allocator>;
+  template <class K, class V, class H, class E, class A, class S, class SM>
+  friend class AtomicHashMap;
 
   struct SimpleRetT { size_t idx; bool success;
     SimpleRetT(size_t i, bool s) : idx(i), success(s) {}
@@ -227,9 +276,9 @@ class AtomicHashArray : boost::noncopyable {
   };
 
   template <class T>
-  SimpleRetT insertInternal(KeyT key, T&& value);
+  SimpleRetT insertInternal(const KeyT& key, T&& value);
 
-  SimpleRetT findInternal(const KeyT key);
+  SimpleRetT findInternal(const KeyT& key) const;
 
   static std::atomic<KeyT>* cellKeyPtr(const value_type& r) {
     // We need some illegal casting here in order to actually store
@@ -265,12 +314,11 @@ class AtomicHashArray : boost::noncopyable {
 
   // Force constructor/destructor private since create/destroy should be
   // used externally instead
-  AtomicHashArray(size_t capacity, KeyT emptyKey, KeyT lockedKey,
-                  KeyT erasedKey, double maxLoadFactor, size_t cacheSize);
+  AtomicHashArray(size_t capacity, const Config& config) noexcept;
 
   ~AtomicHashArray() {}
 
-  inline void unlockCell(value_type* const cell, KeyT newKey) {
+  inline void unlockCell(value_type* const cell, const KeyT& newKey) {
     cellKeyPtr(*cell)->store(newKey, std::memory_order_release);
   }
 
@@ -280,13 +328,13 @@ class AtomicHashArray : boost::noncopyable {
       std::memory_order_acq_rel);
   }
 
-  inline size_t keyToAnchorIdx(const KeyT k) const {
-    const size_t hashVal = HashFcn()(k);
+  inline size_t keyToAnchorIdx(const KeyT& k) const {
+    const size_t hashVal = hash(k);
     const size_t probe = hashVal & kAnchorMask_;
     return LIKELY(probe < capacity_) ? probe : hashVal % capacity_;
   }
 
-  inline size_t probeNext(size_t idx, size_t numProbes) {
+  inline size_t probeNext(size_t idx, size_t numProbes) const {
     //idx += numProbes; // quadratic probing
     idx += 1; // linear probing
     // Avoid modulus because it's slow
