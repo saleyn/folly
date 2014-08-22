@@ -7,7 +7,7 @@ CLEANFILES =
 noinst_PROGRAMS = generate_fingerprint_tables
 generate_fingerprint_tables_SOURCES = build/GenerateFingerprintTables.cpp
 generate_fingerprint_tables_LDADD = libfollybase.la
-generate_fingerprint_tables_LDFLAGS = $(BOOST_FLAGS) -rpath $(subst -L,,$(BOOST_LDFLAGS))
+generate_fingerprint_tables_LDFLAGS = $(BOOST_LDFLAGS) -rpath $(subst -L,,$(BOOST_LDFLAGS))
 
 noinst_LTLIBRARIES = \
 	libfollybase.la
