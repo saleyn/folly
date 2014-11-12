@@ -300,7 +300,8 @@ destroy(AtomicHashArray* p, Allocator& alloc) {
 
   size_t sz = Config::memorySize(p->capacity_);
 
-  alloc.deallocate((char *)p, sz);
+  typename Allocator::pointer q(reinterpret_cast<char*>(p));
+  alloc.deallocate(q, sz);
 }
 
 // clear -- clears all keys and values in the map and resets all counters
