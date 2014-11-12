@@ -18,7 +18,7 @@
 
 #include <utility>
 
-#include <folly/Log.h>
+#include <glog/logging.h>
 
 #include <folly/detail/MPMCPipelineDetail.h>
 

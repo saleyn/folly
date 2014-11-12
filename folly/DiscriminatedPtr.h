@@ -29,7 +29,7 @@
 
 #include <limits>
 #include <stdexcept>
-#include <folly/Log.h>
+#include <glog/logging.h>
 #include <folly/Likely.h>
 #include <folly/Portability.h>
 #include <folly/detail/DiscriminatedPtrDetail.h>

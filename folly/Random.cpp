@@ -22,7 +22,7 @@
 #include <random>
 #include <array>
 
-#include <folly/Log.h>
+#include <glog/logging.h>
 #include <folly/File.h>
 #include <folly/FileUtil.h>
 

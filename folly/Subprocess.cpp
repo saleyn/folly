@@ -35,7 +35,7 @@
 #include <boost/container/flat_set.hpp>
 #include <boost/range/adaptors.hpp>
 
-#include <folly/Log.h>
+#include <glog/logging.h>
 
 #include <folly/Conv.h>
 #include <folly/Exception.h>

@@ -43,7 +43,7 @@
 #include <pthread.h>
 #include <mutex>
 
-#include <folly/Log.h>
+#include <glog/logging.h>
 #include <folly/Portability.h>
 
 #if !FOLLY_X64

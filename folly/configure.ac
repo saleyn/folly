@@ -53,9 +53,8 @@ fi
 CXXFLAGS="$STD $CXXFLAGS"
 
 # Checks for libraries.
-AC_CHECK_LIB([glog],[openlog],[],[AC_DEFINE(
-             [HAVE_GLOG_LOGGER], [0],
-             [Define to 1 if Google GLOG logger is installed.])])
+AC_CHECK_LIB([glog],[openlog],[],[AC_MSG_ERROR(
+             [Please install google-glog library])])
 AC_CHECK_LIB([gflags],[getenv],[],[AC_MSG_ERROR(
              [Please install google-gflags library])])
 

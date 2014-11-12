@@ -11,7 +11,6 @@ generate_fingerprint_tables_LDFLAGS = $(BOOST_LDFLAGS) -rpath $(subst -L,,$(BOOS
 
 noinst_LTLIBRARIES = \
 	libfollybase.la
-generate_fingerprint_tables_LDFLAGS = -rpath $(subst -L,,$(BOOST_LDFLAGS))
 
 lib_LTLIBRARIES = \
 	libfolly.la \
@@ -153,7 +152,6 @@ nobase_follyinclude_HEADERS = \
 	Lazy.h \
 	LifoSem.h \
 	Likely.h \
-	Log.h \
 	Logging.h \
 	MacAddress.h \
 	Malloc.h \

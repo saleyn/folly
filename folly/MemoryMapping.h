@@ -20,7 +20,7 @@
 #include <folly/FBString.h>
 #include <folly/File.h>
 #include <folly/Range.h>
-#include <folly/Log.h>
+#include <glog/logging.h>
 #include <boost/noncopyable.hpp>
 
 namespace folly {
