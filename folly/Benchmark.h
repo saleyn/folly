@@ -23,7 +23,7 @@
 #include <ctime>
 #include <boost/function_types/function_arity.hpp>
 #include <functional>
-#include <glog/logging.h>
+#include <folly/Log.h>
 #include <gflags/gflags.h>
 #include <limits>
 

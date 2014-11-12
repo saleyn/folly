@@ -19,7 +19,7 @@
 
 #include <atomic>
 #include <chrono>
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 #ifndef FB_LOG_EVERY_MS
 /**

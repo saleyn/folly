@@ -25,7 +25,7 @@
 #include <algorithm>
 #include <boost/operators.hpp>
 #include <cstring>
-#include <glog/logging.h>
+#include <folly/Log.h>
 #include <iosfwd>
 #include <stdexcept>
 #include <string>

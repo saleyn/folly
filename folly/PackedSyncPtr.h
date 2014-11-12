@@ -55,7 +55,7 @@
 
 #include <folly/SmallLocks.h>
 #include <type_traits>
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 namespace folly {
 

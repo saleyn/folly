@@ -26,7 +26,7 @@
 
 #include <system_error>
 
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 namespace folly {
 

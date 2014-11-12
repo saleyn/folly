@@ -30,7 +30,7 @@
 #include <boost/noncopyable.hpp>
 #include <boost/random.hpp>
 #include <boost/type_traits.hpp>
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 #include <folly/Memory.h>
 #include <folly/SmallLocks.h>

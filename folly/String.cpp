@@ -25,7 +25,7 @@
 #include <stdexcept>
 #include <iterator>
 #include <cctype>
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 namespace folly {
 

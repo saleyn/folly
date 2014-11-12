@@ -31,7 +31,7 @@
 #include <folly/detail/GroupVarintDetail.h>
 #include <folly/Bits.h>
 #include <folly/Range.h>
-#include <glog/logging.h>
+#include <folly/Log.h>
 
 #ifdef __SSSE3__
 #include <x86intrin.h>
